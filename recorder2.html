@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Recorder</title>
+</head>
+<body>
+    <h2>Voice Recorder</h2>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+    <audio id="audioPlayback" controls></audio>
+    <button id="uploadBtn" disabled>Upload & Send</button>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+        let silenceTimer;
+        let audioContext;
+        let analyser;
+        let microphone;
+        let dataArray;
+        let silenceThreshold = 0.01; // Adjust this if needed
+        let silenceDuration = 2000; // Stop recording after 2 sec of silence
+
+        document.getElementById("startBtn").addEventListener("click", async () => {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioContext = new AudioContext();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 256;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                document.getElementById("audioPlayback").src = audioUrl;
+                document.getElementById("uploadBtn").disabled = false;
+            };
+
+            mediaRecorder.start();
+            document.getElementById("startBtn").disabled = true;
+            document.getElementById("stopBtn").disabled = false;
+
+            checkForSilence();
+        });
+
+        document.getElementById("stopBtn").addEventListener("click", () => {
+            stopRecording();
+        });
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+            }
+            document.getElementById("startBtn").disabled = false;
+            document.getElementById("stopBtn").disabled = true;
+            clearTimeout(silenceTimer);
+        }
+
+        function checkForSilence() {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+            }
+            let averageVolume = sum / dataArray.length;
+
+            if (averageVolume < silenceThreshold * 255) {
+                if (!silenceTimer) {
+                    silenceTimer = setTimeout(() => {
+                        stopRecording();
+                    }, silenceDuration);
+                }
+            } else {
+                clearTimeout(silenceTimer);
+                silenceTimer = null;
+            }
+
+            requestAnimationFrame(checkForSilence);
+        }
+
+        document.getElementById("uploadBtn").addEventListener("click", async () => {
+            const formData = new FormData();
+            formData.append("audio", audioBlob, "recording.wav");
+
+            // Replace with your Make webhook URL
+            const webhookUrl = "https://hook.eu2.make.com/cvnb76z0uj8poxha9hledya3lsh741of"; 
+
+            const response = await fetch(webhookUrl, {
+                method: "POST",
+                body: formData
+            });
+
+            const result = await response.json();
+            alert("File uploaded! URL: " + result.audio_url);
+        });
+    </script>
+</body>
+</html>

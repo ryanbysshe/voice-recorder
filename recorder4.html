@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Recorder</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #recordBtn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background-color: green;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        #recordBtn.recording {
+            background-color: blue;
+            animation: pulse 0.5s infinite alternate;
+        }
+        @keyframes pulse {
+            from {
+                transform: scale(1);
+            }
+            to {
+                transform: scale(1.2);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <button id="recordBtn"></button>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+        let silenceTimer;
+        let audioContext;
+        let analyser;
+        let microphone;
+        let dataArray;
+        let silenceThreshold = 0.1; // Adjust if needed
+        let silenceDuration = 1500; // Silence time before stopping (1.5 sec)
+        let recordBtn = document.getElementById("recordBtn");
+
+        recordBtn.addEventListener("click", async () => {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                stopRecording();
+                return;
+            }
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioContext = new AudioContext();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 256;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+                sendAudioToWebhook(audioBlob);
+            };
+
+            mediaRecorder.start();
+            recordBtn.classList.add("recording");
+            checkForSilence();
+        });
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+            }
+            recordBtn.classList.remove("recording");
+            clearTimeout(silenceTimer);
+        }
+
+        function checkForSilence() {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+            }
+            let averageVolume = sum / dataArray.length;
+
+            adjustButtonPulse(averageVolume);
+
+            if (averageVolume < silenceThreshold * 255) {
+                if (!silenceTimer) {
+                    silenceTimer = setTimeout(() => {
+                        stopRecording();
+                    }, silenceDuration);
+                }
+            } else {
+                clearTimeout(silenceTimer);
+                silenceTimer = null;
+            }
+
+            requestAnimationFrame(checkForSilence);
+        }
+
+        function adjustButtonPulse(volume) {
+            let scale = 1 + (volume / 255) * 0.4; 
+            recordBtn.style.transform = `scale(${scale})`;
+        }
+
+        async function sendAudioToWebhook(audioBlob) {
+            const formData = new FormData();
+            formData.append("audio", audioBlob, "recording.wav");
+
+            const webhookUrl = "https://hook.eu2.make.com/cvnb76z0uj8poxha9hledya3lsh741of"; 
+
+            await fetch(webhookUrl, {
+                method: "POST",
+                body: formData
+            });
+
+            alert("Audio sent to Make webhook!");
+        }
+    </script>
+
+</body>
+</html>
